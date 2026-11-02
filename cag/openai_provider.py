@@ -1,9 +1,21 @@
-"""Adaptador opcional. No se ejecuta en las pruebas ni en la demo predeterminada."""
+"""Adaptador opcional: las pruebas usan transporte falso; la demo no llama la API."""
 import json
 import os
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from .core import Answer
+
+class ProviderResponseError(RuntimeError):
+    """El proveedor no produjo una respuesta final utilizable."""
+
+class ProviderRefusalError(ProviderResponseError):
+    """El proveedor rechazó la solicitud; no es abstención por falta de evidencia."""
+
+class IncompleteResponseError(ProviderResponseError):
+    """La generación terminó sin completar la respuesta."""
+
+class InvalidResponseError(ProviderResponseError):
+    """El sobre o la salida estructurada no cumple el contrato local."""
 
 class OpenAIProvider:
     def __init__(self, transport=None):
@@ -27,6 +39,8 @@ class OpenAIProvider:
             raise RuntimeError('Proveedor no disponible o timeout') from None
 
     def generate(self, question, knowledge):
+        if not isinstance(knowledge.text, str) or not knowledge.text.strip():
+            raise ValueError('Contexto vacío o sin texto visible')
         schema = {'type': 'object', 'properties': {
             'text': {'type': 'string'}, 'source': {'type': 'string'},
             'abstained': {'type': 'boolean'}},
@@ -41,19 +55,42 @@ class OpenAIProvider:
             'text': {'format': {'type': 'json_schema', 'name': 'answer',
                                'strict': True, 'schema': schema}}}
         raw = self.transport(payload)
+        if not isinstance(raw, dict):
+            raise InvalidResponseError('Sobre del proveedor inválido')
+        if raw.get('status') == 'incomplete':
+            raise IncompleteResponseError('Respuesta incompleta del proveedor')
         if raw.get('status') != 'completed':
-            raise RuntimeError('Respuesta incompleta del proveedor')
-        chunks = [c['text'] for item in raw.get('output', [])
-                  if item.get('type') == 'message'
-                  for c in item.get('content', []) if c.get('type') == 'output_text']
+            raise ProviderResponseError('El proveedor no completó la respuesta')
         try:
-            obj = json.loads(''.join(chunks))
-            if set(obj) != {'text', 'source', 'abstained'}:
+            output = raw.get('output', [])
+            if not isinstance(output, list):
                 raise ValueError()
-            if (not isinstance(obj['text'], str) or not obj['text']
+            chunks = []
+            for item in output:
+                if not isinstance(item, dict):
+                    raise ValueError()
+                if item.get('type') != 'message':
+                    continue
+                content = item.get('content', [])
+                if not isinstance(content, list):
+                    raise ValueError()
+                for part in content:
+                    if not isinstance(part, dict):
+                        raise ValueError()
+                    if part.get('type') == 'refusal':
+                        # No incluir texto del proveedor en errores o logs.
+                        raise ProviderRefusalError('El proveedor rechazó la solicitud')
+                    if part.get('type') == 'output_text':
+                        if not isinstance(part.get('text'), str):
+                            raise ValueError()
+                        chunks.append(part['text'])
+            obj = json.loads(''.join(chunks))
+            if not isinstance(obj, dict) or set(obj) != {'text', 'source', 'abstained'}:
+                raise ValueError()
+            if (not isinstance(obj['text'], str) or not obj['text'].strip()
                 or not isinstance(obj['source'], str)
                 or type(obj['abstained']) is not bool):
                 raise ValueError()
             return Answer(**obj)
         except (ValueError, TypeError):
-            raise RuntimeError('Respuesta estructurada inválida') from None
+            raise InvalidResponseError('Respuesta estructurada inválida') from None

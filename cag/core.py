@@ -58,6 +58,8 @@ class Assistant:
             raise PermissionError('Rol no autorizado')
         if not question.strip() or len(question) > 2000:
             raise ValueError('Consulta vacía o demasiado extensa')
+        if not isinstance(knowledge.text, str) or not knowledge.text.strip():
+            raise ValueError('Contexto vacío o sin texto visible')
         if len(knowledge.text) > self.max_context_chars:
             raise ValueError('Contexto excede el límite didáctico de caracteres')
         # Incluir el contenido evita reutilizar una versión declarada incorrectamente.
@@ -72,7 +74,7 @@ class Assistant:
                 return self.cache[key][1], True
             result = self.provider.generate(question, knowledge)
             if (not isinstance(result, Answer) or not isinstance(result.text, str)
-                or not result.text or not isinstance(result.source, str)
+                or not result.text.strip() or not isinstance(result.source, str)
                 or type(result.abstained) is not bool):
                 raise ValueError('Salida del proveedor inválida')
             if not result.abstained and result.source != knowledge.version:
