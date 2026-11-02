@@ -2,7 +2,8 @@
 
 Autor: [Focuz](https://www.focuz.io/). Ejemplo de las sesiones 01 a 05.
 Python 3.11 o posterior. La ejecución predeterminada usa solo la biblioteca estándar.
-Versión del ejemplo: 1.0.1.
+Versión del ejemplo: 1.1.0.
+Repositorio: https://github.com/focuz-ai/focuz-ai-engineering-cag
 
 ## Ejecutar
 
@@ -11,6 +12,7 @@ Desde la carpeta del repositorio:
 ```powershell
 python -m unittest discover -s tests -v
 python -m cag
+python -m cag.decisions
 ```
 
 La demo imprime dos objetos JSON: `cache_hit` es `false` y luego `true`.
@@ -68,6 +70,34 @@ el texto recibido del proveedor. Las pruebas usan por separado un sobre oficial
 `completed/refusal`, otro `incomplete`, JSON inválido y respuestas en blanco.
 Una prueba local de esos contratos no acredita una llamada real a OpenAI.
 
+## Decisión tipada y política independiente (1.1.0)
+
+`cag.decisions.decide(probabilities, allowed_actions, threshold=0.8, min_margin=0.2)`
+recibe exactamente `answer/retrieve/human`, valida números finitos en [0,1] y suma
+1 con tolerancia absoluta 1e-9. Usa `p_max` y diferencia entre las dos primeras
+probabilidades. Empates, poca separación o una acción no autorizada devuelven
+`human` con `abstained=true`; no ejecuta acciones. La política `allowed_actions`
+la aporta el servidor y no el modelo. La salida tipada nunca otorga permisos.
+
+El umbral y el margen son inclusivos. Para evitar artefactos de resta binaria,
+las comparaciones usan el valor decimal de `str` de los números recibidos en un
+contexto local independiente: 0.6 frente a 0.4 cumple un margen mínimo de 0.2.
+No se añade un epsilon: un umbral o margen estrictamente mayor sigue rechazando
+el candidato. Los empates continúan produciendo abstención, incluso con umbral
+y margen cero. Esta semántica corrige la falsa abstención de frontera detectada
+en la revisión independiente de la edición 1.1.0.
+
+La demo imprime una decisión aceptada (p_max 0.9) y una abstención (0.45 frente
+a 0.4). Son distribuciones sintéticas, no inferencia, calibración ni una prueba
+de Jev, Laya o Clef. El umbral 0.8 y margen 0.2 son opciones docentes que requieren
+calibración con datos propios. `p_max` no es el campo `confidence` de Jev.
+Su documentación distingue esa confianza de la probabilidad máxima.
+
+La versión 1.1.0 también cierra A2-CODE-01: JSON externo malformado y bytes con
+codificación inválida producen `InvalidResponseError` sin contenido del proveedor
+en el mensaje. Las regresiones atraviesan `json.load` con cuerpos binarios; HTTP,
+timeout, refusal e incompletitud conservan sus categorías. Ningún error se cachea.
+
 ## Laboratorio
 
 1. Ejecuta la demo y explica cuándo se invoca el proveedor.
@@ -92,3 +122,14 @@ el contrato antes de usarlos en un entorno real. Véase NOTICE.md para el alcanc
 El contrato `completed/refusal` de [1] se volvió a contrastar el 1 de noviembre
 de 2026 al corregir TECH-02 y TECH-03. Se ejecutaron pruebas y demo locales con
 transporte simulado; no se realizó una llamada facturable.
+
+Fuentes complementarias del workshop, consultadas el 2 de noviembre de 2026:
+
+- https://lidr.notion.site/material-workshop-ai-engineer-pro
+- https://docs.typesafe.ai/introduction
+- https://docs.typesafe.ai/confidence
+
+El ejemplo de decisión es una implementación original de Focuz de un contrato
+de validación. Para usar un proveedor real se necesita un adaptador explícito,
+autenticación, evaluación y política de abstención; no se incluye una conexión
+a esos modelos en este laboratorio.

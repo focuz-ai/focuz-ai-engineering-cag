@@ -33,6 +33,9 @@ class OpenAIProvider:
         try:
             with urlopen(req, timeout=20) as response:
                 return json.load(response)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            # Clasificar también el sobre HTTP; nunca propagar su cuerpo en errores.
+            raise InvalidResponseError('Sobre HTTP del proveedor inválido') from None
         except HTTPError as exc:
             raise RuntimeError(f'Proveedor respondió HTTP {exc.code}') from None
         except (URLError, TimeoutError):
